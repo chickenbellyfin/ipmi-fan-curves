@@ -2,6 +2,8 @@
 
 A web UI for managing server fan curves via IPMI. Define temperature-to-fan-speed curves with an interactive chart, assign sensors and fans, and let the daemon apply speeds automatically.
 
+![](screenshot.png)
+
 ## Features
 
 - Drag temperature sensors and fans onto curves

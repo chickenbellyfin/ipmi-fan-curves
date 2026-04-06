@@ -8,5 +8,6 @@ config.json
 .dockerignore
 .venv/
 venv/
+*.png
 CLAUDE.md
 README.md
