@@ -1,0 +1,12 @@
+services:
+  ipmi-fan-curve:
+    build: ghcr.io/chickenbelly/ipmi-fan-curve
+    ports:
+      - "8777:8777"
+    volumes:
+      - ./data:/data
+    environment:
+      - POLL_INTERVAL=30
+    devices:
+      - /dev/ipmi0:/dev/ipmi0
+    restart: unless-stopped

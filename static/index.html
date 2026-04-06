@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPMI Fan Curve Manager</title>
+<link rel="icon" type="image/svg+xml" href="/static/logo.svg">
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #242836;
+    --border: #2e3348;
+    --text: #e0e0e8;
+    --text2: #8888a0;
+    --accent: #5b8def;
+    --accent2: #3d6dd4;
+    --danger: #e05555;
+    --success: #44bb77;
+    --orange: #e89040;
+    --radius: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  header h1 { font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+  header h1 img { height: 28px; width: 28px; }
+  header h1 span { color: var(--accent); }
+
+  .layout {
+    display: flex;
+    height: calc(100vh - 65px);
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 260px;
+    min-width: 260px;
+    border-right: 1px solid var(--border);
+    padding: 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .sidebar h3 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text2);
+    margin-bottom: 8px;
+  }
+  .sensor-chip, .fan-chip {
+    padding: 8px 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: grab;
+    font-size: 13px;
+    margin-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .sensor-chip:hover, .fan-chip:hover {
+    border-color: var(--accent);
+    background: #1e2233;
+  }
+  .sensor-chip:active, .fan-chip:active { cursor: grabbing; }
+  .sensor-chip .reading { font-weight: 600; font-size: 12px; }
+  .fan-chip { flex-wrap: wrap; }
+  .fan-chip .fan-top { display: flex; align-items: center; gap: 8px; width: 100%; }
+  .fan-chip .fan-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fan-chip .reading { color: var(--accent); font-weight: 600; font-size: 12px; white-space: nowrap; }
+  .fan-chip.assigned { cursor: pointer; border-color: rgba(91,141,239,0.3); }
+  .fan-chip.assigned:hover { border-color: var(--accent); }
+  .fan-chip.overridden { border-color: rgba(232,144,64,0.4); }
+  .fan-chip.overridden:hover { border-color: var(--orange); }
+  .override-badge { color: var(--orange) !important; background: rgba(232,144,64,0.12) !important; display: flex; justify-content: space-between; align-items: center; }
+  .override-badge .remove { cursor: pointer; font-size: 14px; line-height: 1; opacity: 0.6; }
+  .override-badge .remove:hover { opacity: 1; color: var(--danger); }
+  .fan-override-btn { background: none; border: none; color: var(--text2); font-size: 11px; cursor: pointer; padding: 0; white-space: nowrap; flex-shrink: 0; text-decoration: underline; text-underline-offset: 2px; }
+  .fan-override-btn:hover { color: var(--orange); }
+  .fan-name { cursor: text; }
+  .fan-name:hover { text-decoration: underline dotted; text-underline-offset: 2px; }
+  .fan-rename-input { background: var(--surface); border: 1px solid var(--accent); color: var(--text); font-size: 13px; width: 100px; padding: 1px 4px; border-radius: 4px; outline: none; }
+  .fan-badge {
+    font-size: 10px;
+    color: var(--accent);
+    background: rgba(91,141,239,0.12);
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-top: 4px;
+    width: 100%;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .temp-green { color: #44bb77; }
+  .temp-yellow { color: #d4c940; }
+  .temp-orange { color: #e89040; }
+  .temp-red { color: #e05555; }
+
+  .sensor-chip .curve-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+    margin-right: 2px;
+  }
+  .sensor-chip .curve-indicator.unused {
+    background: var(--text2);
+    opacity: 0.3;
+  }
+
+  /* ── Main area ── */
+  .main {
+    flex: 1;
+    padding: 24px 32px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .btn {
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .btn:hover { border-color: var(--accent); background: #1e2233; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent2); }
+  .btn-primary:disabled { background: var(--surface2); border-color: var(--border); color: var(--text2); cursor: default; opacity: 0.5; }
+  .btn-primary:disabled:hover { background: var(--surface2); border-color: var(--border); }
+  .btn-danger { border-color: var(--danger); color: var(--danger); }
+  .btn-danger:hover { background: rgba(224, 85, 85, 0.1); }
+
+  /* ── Curve cards ── */
+  .curves-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+    gap: 16px;
+  }
+
+  .curve-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .curve-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .curve-header input {
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    outline: none;
+    width: 160px;
+  }
+  .curve-header input::placeholder { color: var(--text2); }
+  .curve-body { display: flex; flex-direction: column; flex: 1; }
+
+  .curve-config {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+  }
+  .config-section label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text2);
+    display: block;
+    margin-bottom: 6px;
+  }
+  .drop-zone {
+    height: 72px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-content: flex-start;
+    overflow-y: auto;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(91, 141, 239, 0.06);
+  }
+  .drop-zone .tag {
+    padding: 4px 10px;
+    background: var(--surface2);
+    border-radius: 4px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .drop-zone .tag .remove {
+    cursor: pointer;
+    color: var(--text2);
+    font-size: 14px;
+    line-height: 1;
+  }
+  .drop-zone .tag .remove:hover { color: var(--danger); }
+  .drop-zone .placeholder {
+    color: var(--text2);
+    font-size: 12px;
+    padding: 8px;
+    width: 100%;
+    text-align: center;
+  }
+  .agg-toggle {
+    display: flex;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .agg-toggle button {
+    flex: 1;
+    padding: 5px 10px;
+    background: transparent;
+    border: none;
+    color: var(--text2);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .agg-toggle button.active {
+    background: var(--accent);
+    color: #fff;
+  }
+  .agg-value {
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  /* ── Chart area ── */
+  .curve-chart-area {
+    position: relative;
+    min-height: 200px;
+    flex: 1;
+    overflow: hidden;
+  }
+  .chart-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: crosshair;
+  }
+
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 80px;
+    color: var(--text2);
+    text-align: center;
+    gap: 12px;
+  }
+  .empty-state svg { opacity: 0.3; }
+
+  .status-bar {
+    padding: 8px 14px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text2);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .tip {
+    position: fixed;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    color: var(--text);
+  }
+  .btn-sm {
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+  .save-indicator {
+    font-size: 12px;
+    color: var(--text2);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: opacity 0.3s;
+  }
+  .save-indicator .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--text2);
+    transition: background 0.3s;
+  }
+  .save-indicator.saving .dot { background: var(--orange); }
+  .save-indicator.saved .dot { background: var(--success); }
+  .save-indicator.error .dot { background: var(--danger); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><img src="/static/logo.svg" alt="Logo"><span>IPMI</span> Fan Curve Manager</h1>
+  <div class="toolbar">
+    <span class="save-indicator" id="save-indicator"><span class="dot"></span> <span id="save-label"></span></span>
+    <button class="btn btn-primary" onclick="addCurve()">+ New Curve</button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div>
+      <h3>Temperature Sensors</h3>
+      <div id="temp-sensors"></div>
+    </div>
+    <div>
+      <h3>Fans</h3>
+      <div id="fan-list"></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="curves-list" id="curves-list"></div>
+    <div class="empty-state" id="empty-state">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M3 3v18h18"/><path d="M7 16l4-8 4 4 5-9"/>
+      </svg>
+      <div>No fan curves configured</div>
+      <div style="font-size:13px">Click <strong>+ New Curve</strong> to get started</div>
+    </div>
+  </main>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+
+let sensors = { temps: [], fans: [] };
+let curves = [];
+let dragData = null;
+let fanNames = {};
+let fanOverrides = {};
+
+// ── Init ───────────────────────────────────────────────────────────────────
+
+async function init() {
+  const [sensorRes, curveRes, namesRes, overridesRes] = await Promise.all([
+    fetch('/api/sensors').then(r => r.json()),
+    fetch('/api/curves').then(r => r.json()),
+    fetch('/api/fan-names').then(r => r.json()),
+    fetch('/api/fan-overrides').then(r => r.json()),
+  ]);
+  sensors = sensorRes;
+  curves = curveRes.curves || [];
+  fanNames = namesRes.names || {};
+  fanOverrides = overridesRes.overrides || {};
+  renderSidebar();
+  renderCurves();
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function fanDisplayName(fanId) {
+  return fanNames[fanId] || fanId;
+}
+
+function startFanRename(e, fanId) {
+  e.stopPropagation();
+  const span = e.currentTarget;
+  const current = fanDisplayName(fanId);
+  const input = document.createElement('input');
+  input.value = current;
+  input.className = 'fan-rename-input';
+  let committed = false;
+  function commit() {
+    if (committed) return;
+    committed = true;
+    const val = input.value.trim();
+    if (val && val !== fanId) {
+      fanNames[fanId] = val;
+    } else {
+      delete fanNames[fanId];
+    }
+    saveFanNames();
+    renderSidebar();
+    renderCurves();
+  }
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+    if (ev.key === 'Escape') { renderSidebar(); }
+  });
+  input.addEventListener('blur', commit);
+  span.textContent = '';
+  span.appendChild(input);
+  input.focus();
+  input.select();
+}
+
+async function saveFanNames() {
+  await fetch('/api/fan-names', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ names: fanNames }),
+  });
+}
+
+function startOverride(fanId) {
+  const current = fanOverrides[fanId];
+  const pctStr = prompt(`Set manual duty override for ${fanDisplayName(fanId)} (0-100%):`, current !== undefined ? current : 50);
+  if (pctStr === null) return;
+  const pct = parseInt(pctStr, 10);
+  if (isNaN(pct) || pct < 0 || pct > 100) {
+    showToast('Enter a value between 0 and 100', true);
+    return;
+  }
+  fanOverrides[fanId] = pct;
+  saveFanOverrides();
+  renderSidebar();
+}
+
+async function removeOverride(fanId) {
+  delete fanOverrides[fanId];
+  await fetch(`/api/fan-overrides/${encodeURIComponent(fanId)}`, { method: 'DELETE' });
+  renderSidebar();
+  showToast(`Override removed for ${fanDisplayName(fanId)}`);
+}
+
+async function saveFanOverrides() {
+  const res = await fetch('/api/fan-overrides', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ overrides: fanOverrides }),
+  });
+  if (res.ok) {
+    showToast('Override applied');
+  } else {
+    showToast('Failed to save override', true);
+  }
+}
+
+const TEMP_COLORS = [
+  { max: 40, cls: 'temp-green', hex: '#44bb77' },
+  { max: 60, cls: 'temp-yellow', hex: '#d4c940' },
+  { max: 80, cls: 'temp-orange', hex: '#e89040' },
+  { max: Infinity, cls: 'temp-red', hex: '#e05555' },
+];
+function tempColor(temp) {
+  return TEMP_COLORS.find(c => temp < c.max);
+}
+
+function getAggregatedTemp(curve) {
+  if (!curve.sensors.length) return null;
+  const sensorMap = {};
+  sensors.temps.forEach(s => { sensorMap[s.id] = s.reading; });
+  const readings = curve.sensors.map(id => sensorMap[id]).filter(v => v != null);
+  if (!readings.length) return null;
+  if (curve.aggregation === 'max') return Math.max(...readings);
+  return readings.reduce((a, b) => a + b, 0) / readings.length;
+}
+
+// ── Autosave ────────────────────────────────────────────────────────────────
+
+let autoSaveTimer = null;
+let saveIndicatorTimer = null;
+
+function showSaveStatus(state, text) {
+  const el = document.getElementById('save-indicator');
+  const label = document.getElementById('save-label');
+  el.className = 'save-indicator ' + state;
+  label.textContent = text;
+  clearTimeout(saveIndicatorTimer);
+}
+
+function scheduleAutoSave() {
+  clearTimeout(autoSaveTimer);
+  showSaveStatus('saving', 'Unsaved');
+  autoSaveTimer = setTimeout(doAutoSave, 800);
+}
+
+async function doAutoSave() {
+  showSaveStatus('saving', 'Saving…');
+  try {
+    const res = await fetch('/api/curves', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ curves }),
+    });
+    if (res.ok) {
+      showSaveStatus('saved', 'Saved');
+    } else {
+      showSaveStatus('error', 'Save failed');
+    }
+  } catch {
+    showSaveStatus('error', 'Save failed');
+  }
+}
+
+// ── Sidebar rendering ──────────────────────────────────────────────────────
+
+function sensorCurveAssignments(sensorId) {
+  const assigned = [];
+  for (let i = 0; i < curves.length; i++) {
+    if (curves[i].sensors.includes(sensorId)) assigned.push(curves[i].name);
+  }
+  return assigned;
+}
+
+function fanCurveAssignment(fanId) {
+  for (let i = 0; i < curves.length; i++) {
+    if (curves[i].fans.includes(fanId)) return { idx: i, name: curves[i].name };
+  }
+  return null;
+}
+
+function onFanChipClick(fanId) {
+  const assignment = fanCurveAssignment(fanId);
+  if (!assignment) return;
+  const card = document.getElementById(`curve-card-${assignment.idx}`);
+  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function renderSidebar() {
+  const tempContainer = document.getElementById('temp-sensors');
+  const fanContainer = document.getElementById('fan-list');
+
+  tempContainer.innerHTML = sensors.temps.map(s => {
+    const assignedCurves = sensorCurveAssignments(s.id);
+    const used = assignedCurves.length > 0;
+    return `
+    <div class="sensor-chip" draggable="true"
+         ondragstart="onDragStart(event, 'sensor', '${s.id}')"
+         onmouseenter="showTip('${esc(used ? 'Used in: ' + assignedCurves.join(', ') : 'Not assigned to any curve')}', event.clientX, event.clientY)"
+         onmouseleave="hideTip()">
+      <span class="curve-indicator ${used ? '' : 'unused'}"></span>
+      <span style="flex:1">${s.name}</span>
+      <span class="reading ${tempColor(s.reading).cls}">${s.reading.toFixed(1)}&deg;C</span>
+    </div>
+    `;
+  }).join('');
+
+  fanContainer.innerHTML = sensors.fans.map(f => {
+    const assignment = fanCurveAssignment(f.id);
+    const assigned = assignment != null;
+    const hasOverride = fanOverrides[f.id] !== undefined;
+    return `
+      <div class="fan-chip ${assigned ? 'assigned' : ''} ${hasOverride ? 'overridden' : ''}"
+           ${assigned && !hasOverride ? `onclick="onFanChipClick('${esc(f.id)}')"` : ''}
+           ${!assigned ? `draggable="true" ondragstart="onDragStart(event, 'fan', '${f.id}')"` : ''}>
+        <div class="fan-top">
+          <span class="fan-name" ondblclick="startFanRename(event, '${esc(f.id)}')">${esc(fanDisplayName(f.id))}</span>
+          <span class="reading">${f.reading} RPM</span>
+          <button class="fan-override-btn" onclick="event.stopPropagation(); startOverride('${esc(f.id)}')">${hasOverride ? 'edit' : 'override'}</button>
+        </div>
+        ${hasOverride ? `<div class="fan-badge override-badge">Override: ${fanOverrides[f.id]}%<span class="remove" onclick="event.stopPropagation(); removeOverride('${esc(f.id)}')">&times;</span></div>` : ''}
+        ${assigned ? `<div class="fan-badge">${esc(assignment.name)}</div>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+// ── Drag and drop ──────────────────────────────────────────────────────────
+
+function onDragStart(e, type, id) {
+  dragData = { type, id };
+  e.dataTransfer.effectAllowed = 'copy';
+  e.dataTransfer.setData('text/plain', id);
+}
+
+function onDragOver(e) {
+  e.preventDefault();
+  e.currentTarget.classList.add('drag-over');
+}
+
+function onDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+function onDropSensor(e, curveIdx) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (!dragData || dragData.type !== 'sensor') return;
+  const curve = curves[curveIdx];
+  if (!curve.sensors.includes(dragData.id)) {
+    curve.sensors.push(dragData.id);
+    renderCurves();
+    scheduleAutoSave();
+  }
+  dragData = null;
+}
+
+function onDropFan(e, curveIdx) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (!dragData || dragData.type !== 'fan') return;
+  const existing = fanCurveAssignment(dragData.id);
+  if (existing && existing.idx !== curveIdx) {
+    showToast(`${fanDisplayName(dragData.id)} is already used in "${existing.name}"`, true);
+    dragData = null;
+    return;
+  }
+  const curve = curves[curveIdx];
+  if (!curve.fans.includes(dragData.id)) {
+    curve.fans.push(dragData.id);
+    renderCurves();
+    renderSidebar();
+    scheduleAutoSave();
+  }
+  dragData = null;
+}
+
+function removeSensor(curveIdx, sensorId) {
+  curves[curveIdx].sensors = curves[curveIdx].sensors.filter(s => s !== sensorId);
+  renderCurves();
+  scheduleAutoSave();
+}
+
+function removeFan(curveIdx, fanId) {
+  curves[curveIdx].fans = curves[curveIdx].fans.filter(f => f !== fanId);
+  renderCurves();
+  renderSidebar();
+  scheduleAutoSave();
+}
+
+function setAggregation(curveIdx, value) {
+  curves[curveIdx].aggregation = value;
+  renderCurves();
+  scheduleAutoSave();
+}
+
+function setCurveName(curveIdx, name) {
+  curves[curveIdx].name = name;
+}
+
+
+// ── Curve management ───────────────────────────────────────────────────────
+
+function addCurve() {
+  curves.push({
+    id: 'curve_' + Date.now(),
+    name: 'New Curve',
+    sensors: [],
+    aggregation: 'max',
+    fans: [],
+    points: [
+      { temp: 20, pct: 0 },
+      { temp: 100, pct: 100 },
+    ],
+  });
+  renderCurves();
+  scheduleAutoSave();
+}
+
+function deleteCurve(idx) {
+  curves.splice(idx, 1);
+  renderCurves();
+  scheduleAutoSave();
+}
+
+
+function showToast(msg, error) {
+  const el = document.createElement('div');
+  el.textContent = msg;
+  el.style.cssText = `
+    position: fixed; bottom: 24px; right: 24px; padding: 10px 20px;
+    background: ${error ? 'var(--danger)' : 'var(--success)'}; color: #fff;
+    border-radius: 8px; font-size: 13px; z-index: 999;
+    animation: fadeIn 0.2s ease;
+  `;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2000);
+}
+
+// ── Render curves ──────────────────────────────────────────────────────────
+
+function renderCurves() {
+  const list = document.getElementById('curves-list');
+  const empty = document.getElementById('empty-state');
+  empty.style.display = curves.length ? 'none' : 'flex';
+
+  list.innerHTML = curves.map((c, i) => `
+    <div class="curve-card" id="curve-card-${i}">
+      <div class="curve-header">
+        <input value="${esc(c.name)}" placeholder="Curve name"
+               oninput="setCurveName(${i}, this.value); scheduleAutoSave()">
+      </div>
+      <div class="curve-body">
+        <div class="curve-config">
+          <div class="config-section">
+            <label>Input Sensors</label>
+            <div class="drop-zone" id="dz-sensor-${i}"
+                 ondragover="onDragOver(event)"
+                 ondragleave="onDragLeave(event)"
+                 ondrop="onDropSensor(event, ${i})">
+              ${c.sensors.length ? c.sensors.map(s => `
+                <span class="tag">${esc(s)}
+                  <span class="remove" onclick="removeSensor(${i}, '${esc(s)}')">&times;</span>
+                </span>
+              `).join('') : '<span class="placeholder">Drag sensors here</span>'}
+            </div>
+          </div>
+          <div class="config-section">
+            <label>Target Fans</label>
+            <div class="drop-zone" id="dz-fan-${i}"
+                 ondragover="onDragOver(event)"
+                 ondragleave="onDragLeave(event)"
+                 ondrop="onDropFan(event, ${i})">
+              ${c.fans.length ? c.fans.map(f => `
+                <span class="tag">${esc(fanDisplayName(f))}
+                  <span class="remove" onclick="removeFan(${i}, '${esc(f)}')">&times;</span>
+                </span>
+              `).join('') : '<span class="placeholder">Drag fans here</span>'}
+            </div>
+          </div>
+          <div class="config-section">
+            <label>Aggregation</label>
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="agg-toggle">
+                <button class="${c.aggregation === 'max' ? 'active' : ''}" onclick="setAggregation(${i}, 'max')">Max</button>
+                <button class="${c.aggregation === 'avg' ? 'active' : ''}" onclick="setAggregation(${i}, 'avg')">Avg</button>
+              </div>
+              <span class="agg-value" id="agg-value-${i}">${(() => {
+                const v = getAggregatedTemp(c);
+                if (v == null) return '<span style="color:var(--text2)">--</span>';
+                return '<span class="' + tempColor(v).cls + '">' + v.toFixed(1) + '&deg;C</span>';
+              })()}</span>
+            </div>
+          </div>
+        </div>
+        <div class="curve-chart-area">
+          <canvas class="chart-canvas" id="chart-${i}"></canvas>
+        </div>
+      </div>
+      <div class="status-bar">
+        <span style="flex:1">Click to add &middot; Drag to move &middot; Right-click to remove</span>
+        <button class="btn btn-sm btn-danger" onclick="deleteCurve(${i})">Delete Curve</button>
+      </div>
+    </div>
+  `).join('');
+
+  // Draw charts and bind events after DOM update
+  requestAnimationFrame(() => {
+    curves.forEach((c, i) => {
+      const canvas = document.getElementById(`chart-${i}`);
+      if (canvas) {
+        bindChart(canvas, i);
+        drawChart(i);
+      }
+    });
+  });
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// ── Chart drawing & interaction ────────────────────────────────────────────
+
+const CHART_PAD = { top: 24, right: 24, bottom: 36, left: 40 };
+const TEMP_MIN = 20;
+const TEMP_MAX = 100;
+
+// Per-chart hover state: { curveIdx, temp }
+let chartHover = null;
+
+function interpolateCurve(points, temp) {
+  const pts = points.slice().sort((a, b) => a.temp - b.temp);
+  if (!pts.length) return 0;
+  if (temp <= pts[0].temp) return pts[0].pct;
+  if (temp >= pts[pts.length - 1].temp) return pts[pts.length - 1].pct;
+  for (let i = 0; i < pts.length - 1; i++) {
+    if (temp >= pts[i].temp && temp <= pts[i + 1].temp) {
+      const t = (temp - pts[i].temp) / (pts[i + 1].temp - pts[i].temp);
+      return pts[i].pct + t * (pts[i + 1].pct - pts[i].pct);
+    }
+  }
+  return pts[pts.length - 1].pct;
+}
+
+function tempToX(temp, c) { return c.plotX + ((temp - TEMP_MIN) / (TEMP_MAX - TEMP_MIN)) * c.plotW; }
+function pctToY(pct, c) { return c.plotY + c.plotH - (pct / 100) * c.plotH; }
+function xToTemp(x, c) { return Math.max(TEMP_MIN, Math.min(TEMP_MAX, TEMP_MIN + ((x - c.plotX) / c.plotW) * (TEMP_MAX - TEMP_MIN))); }
+function yToPct(y, c) { return Math.max(0, Math.min(100, ((c.plotY + c.plotH - y) / c.plotH) * 100)); }
+
+function sizeCanvas(canvas) {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const needW = Math.round(rect.width * dpr);
+  const needH = Math.round(rect.height * dpr);
+  if (canvas.width !== needW || canvas.height !== needH) {
+    canvas.width = needW;
+    canvas.height = needH;
+  }
+}
+
+function drawChart(curveIdx) {
+  const canvas = document.getElementById(`chart-${curveIdx}`);
+  if (!canvas) return;
+
+  // Only resize when not dragging to avoid layout feedback loop
+  if (!activeDrag) {
+    sizeCanvas(canvas);
+  }
+
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.width / dpr;
+  const h = canvas.height / dpr;
+
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const c = {
+    plotX: CHART_PAD.left,
+    plotY: CHART_PAD.top,
+    plotW: w - CHART_PAD.left - CHART_PAD.right,
+    plotH: h - CHART_PAD.top - CHART_PAD.bottom,
+  };
+
+  ctx.clearRect(0, 0, w, h);
+
+  // Grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  for (let t = TEMP_MIN; t <= TEMP_MAX; t += 10) {
+    const x = tempToX(t, c);
+    ctx.beginPath(); ctx.moveTo(x, c.plotY); ctx.lineTo(x, c.plotY + c.plotH); ctx.stroke();
+  }
+  for (let p = 0; p <= 100; p += 10) {
+    const y = pctToY(p, c);
+    ctx.beginPath(); ctx.moveTo(c.plotX, y); ctx.lineTo(c.plotX + c.plotW, y); ctx.stroke();
+  }
+
+  // Axes labels
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.font = '11px -apple-system, system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  for (let t = TEMP_MIN; t <= TEMP_MAX; t += 10) {
+    let label;
+    if (t === TEMP_MIN) label = `<${t}\u00b0`;
+    else if (t === TEMP_MAX) label = `${t}\u00b0+`;
+    else label = `${t}\u00b0`;
+    ctx.fillText(label, tempToX(t, c), c.plotY + c.plotH + 20);
+  }
+  ctx.textAlign = 'right';
+  for (let p = 0; p <= 100; p += 20) {
+    ctx.fillText(`${p}%`, c.plotX - 10, pctToY(p, c) + 4);
+  }
+
+  // Axis titles
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  ctx.font = '10px -apple-system, system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Temperature (\u00b0C)', c.plotX + c.plotW / 2, c.plotY + c.plotH + 40);
+
+  // Curve line — extend horizontally to 0 and 100 if endpoints don't reach
+  const pts = curves[curveIdx].points.slice().sort((a, b) => a.temp - b.temp);
+  if (pts.length >= 1) {
+    const first = pts[0];
+    const last = pts[pts.length - 1];
+
+    // Build the full display path including horizontal extensions
+    const displayPts = [];
+    if (first.temp > TEMP_MIN) displayPts.push({ temp: TEMP_MIN, pct: first.pct });
+    displayPts.push(...pts);
+    if (last.temp < TEMP_MAX) displayPts.push({ temp: TEMP_MAX, pct: last.pct });
+
+    // Fill under curve
+    ctx.beginPath();
+    ctx.moveTo(tempToX(displayPts[0].temp, c), pctToY(0, c));
+    displayPts.forEach(p => ctx.lineTo(tempToX(p.temp, c), pctToY(p.pct, c)));
+    ctx.lineTo(tempToX(displayPts[displayPts.length - 1].temp, c), pctToY(0, c));
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(0, c.plotY, 0, c.plotY + c.plotH);
+    grad.addColorStop(0, 'rgba(91, 141, 239, 0.12)');
+    grad.addColorStop(1, 'rgba(91, 141, 239, 0.01)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    displayPts.forEach((p, i) => {
+      const x = tempToX(p.temp, c);
+      const y = pctToY(p.pct, c);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = '#5b8def';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Dashed style for the horizontal extensions
+    if (first.temp > TEMP_MIN || last.temp < TEMP_MAX) {
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      if (first.temp > TEMP_MIN) {
+        ctx.moveTo(tempToX(TEMP_MIN, c), pctToY(first.pct, c));
+        ctx.lineTo(tempToX(first.temp, c), pctToY(first.pct, c));
+      }
+      if (last.temp < TEMP_MAX) {
+        ctx.moveTo(tempToX(last.temp, c), pctToY(last.pct, c));
+        ctx.lineTo(tempToX(TEMP_MAX, c), pctToY(last.pct, c));
+      }
+      ctx.strokeStyle = 'rgba(91, 141, 239, 0.4)';
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // Points
+  pts.forEach(p => {
+    const x = tempToX(p.temp, c);
+    const y = pctToY(p.pct, c);
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#5b8def';
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  });
+
+  // Current temperature indicator
+  const curve = curves[curveIdx];
+  const aggTemp = getAggregatedTemp(curve);
+  if (aggTemp != null && aggTemp >= TEMP_MIN && aggTemp <= TEMP_MAX) {
+    const tx = tempToX(aggTemp, c);
+    const color = tempColor(aggTemp).hex;
+
+    // Vertical line
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(tx, c.plotY);
+    ctx.lineTo(tx, c.plotY + c.plotH);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Label at top
+    const label = `Current: ${aggTemp.toFixed(1)}\u00b0C`;
+    ctx.font = '10px -apple-system, system-ui, sans-serif';
+    const tw = ctx.measureText(label).width;
+    const lx = Math.min(Math.max(tx - tw / 2 - 4, c.plotX), c.plotX + c.plotW - tw - 8);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.15;
+    ctx.beginPath();
+    ctx.roundRect(lx, c.plotY - 18, tw + 8, 16, 3);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = color;
+    ctx.textAlign = 'left';
+    ctx.fillText(label, lx + 4, c.plotY - 6);
+  }
+
+  // Hover crosshair
+  if (chartHover && chartHover.curveIdx === curveIdx) {
+    const hx = tempToX(chartHover.temp, c);
+    ctx.save();
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(hx, c.plotY);
+    ctx.lineTo(hx, c.plotY + c.plotH);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+}
+
+function chartCoords(canvas) {
+  const r = canvas.getBoundingClientRect();
+  return {
+    plotX: CHART_PAD.left,
+    plotY: CHART_PAD.top,
+    plotW: r.width - CHART_PAD.left - CHART_PAD.right,
+    plotH: r.height - CHART_PAD.top - CHART_PAD.bottom,
+  };
+}
+
+function bindChart(canvas, curveIdx) {
+  if (canvas._bindId === curveIdx) return;
+  canvas._bindId = curveIdx;
+
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button === 2) return;
+    chartHover = null;
+    hideTip();
+    const cr = canvas.getBoundingClientRect();
+    const mx = e.clientX - cr.left;
+    const my = e.clientY - cr.top;
+    const cc = chartCoords(canvas);
+    const pts = curves[curveIdx].points;
+
+    for (let i = 0; i < pts.length; i++) {
+      const px = tempToX(pts[i].temp, cc);
+      const py = pctToY(pts[i].pct, cc);
+      if (Math.hypot(mx - px, my - py) < 10) {
+        activeDrag = { curveIdx, pointIdx: i, canvas };
+        return;
+      }
+    }
+
+    const temp = Math.round(xToTemp(mx, cc));
+    let pct = Math.round(yToPct(my, cc));
+    if (temp >= TEMP_MIN && temp <= TEMP_MAX && pct >= 0 && pct <= 100) {
+      const tooClose = pts.some(p => Math.abs(p.temp - temp) < 5);
+      if (tooClose) return;
+      const sorted = pts.slice().sort((a, b) => a.temp - b.temp);
+      const prevPt = sorted.filter(p => p.temp < temp).pop();
+      const nextPt = sorted.find(p => p.temp > temp);
+      if (prevPt) pct = Math.max(pct, prevPt.pct);
+      if (nextPt) pct = Math.min(pct, nextPt.pct);
+      pts.push({ temp, pct });
+      pts.sort((a, b) => a.temp - b.temp);
+      const newIdx = pts.findIndex(p => p.temp === temp && p.pct === pct);
+      activeDrag = { curveIdx, pointIdx: newIdx, canvas };
+      drawChart(curveIdx);
+    }
+  });
+
+  canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const cr = canvas.getBoundingClientRect();
+    const mx = e.clientX - cr.left;
+    const my = e.clientY - cr.top;
+    const cc = chartCoords(canvas);
+    const pts = curves[curveIdx].points;
+
+    for (let i = 0; i < pts.length; i++) {
+      const px = tempToX(pts[i].temp, cc);
+      const py = pctToY(pts[i].pct, cc);
+      if (Math.hypot(mx - px, my - py) < 12) {
+        if (pts.length > 2) {
+          pts.splice(i, 1);
+          renderCurves();
+          scheduleAutoSave();
+        }
+        return;
+      }
+    }
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (activeDrag) return;
+    const cr = canvas.getBoundingClientRect();
+    const mx = e.clientX - cr.left;
+    const my = e.clientY - cr.top;
+    const cc = chartCoords(canvas);
+    const temp = xToTemp(mx, cc);
+    if (mx >= cc.plotX && mx <= cc.plotX + cc.plotW && my >= cc.plotY && my <= cc.plotY + cc.plotH) {
+      const roundedTemp = Math.round(temp);
+      const outputPct = Math.round(interpolateCurve(curves[curveIdx].points, roundedTemp));
+      chartHover = { curveIdx, temp: roundedTemp };
+      drawChart(curveIdx);
+      showTip(`${roundedTemp}\u00b0C \u2192 ${outputPct}%`, e.clientX, e.clientY);
+    } else {
+      if (chartHover && chartHover.curveIdx === curveIdx) {
+        chartHover = null;
+        drawChart(curveIdx);
+      }
+      hideTip();
+    }
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    if (!activeDrag) {
+      if (chartHover && chartHover.curveIdx === curveIdx) {
+        chartHover = null;
+        drawChart(curveIdx);
+      }
+      hideTip();
+    }
+  });
+}
+
+
+
+// Global drag state — survives re-renders
+let activeDrag = null;
+
+// Shared tooltip element
+const tip = document.createElement('div');
+tip.className = 'tip';
+tip.style.display = 'none';
+document.body.appendChild(tip);
+
+function showTip(text, x, y) {
+  tip.textContent = text;
+  tip.style.display = 'block';
+  tip.style.left = (x + 14) + 'px';
+  tip.style.top = (y - 10) + 'px';
+}
+
+function hideTip() {
+  tip.style.display = 'none';
+}
+
+// Document-level drag handlers so dragging continues outside canvas
+document.addEventListener('mousemove', (e) => {
+  if (!activeDrag) return;
+  const canvas = activeDrag.canvas;
+  const cr = canvas.getBoundingClientRect();
+  const mx = e.clientX - cr.left;
+  const my = e.clientY - cr.top;
+  const cc = chartCoords(canvas);
+
+  const d = activeDrag;
+  const pts = curves[d.curveIdx].points;
+  const pt = pts[d.pointIdx];
+  let newTemp = Math.round(xToTemp(mx, cc));
+  let newPct = Math.round(yToPct(my, cc));
+
+  const prev = pts.slice(0, d.pointIdx).filter(p => p !== pt);
+  const next = pts.slice(d.pointIdx + 1).filter(p => p !== pt);
+  const prevPt = prev.length ? prev[prev.length - 1] : null;
+  const nextPt = next.length ? next[0] : null;
+  if (prevPt) {
+    newTemp = Math.max(newTemp, prevPt.temp + 1);
+    newPct = Math.max(newPct, prevPt.pct);
+  }
+  if (nextPt) {
+    newTemp = Math.min(newTemp, nextPt.temp - 1);
+    newPct = Math.min(newPct, nextPt.pct);
+  }
+
+  pt.temp = newTemp;
+  pt.pct = newPct;
+  drawChart(d.curveIdx);
+
+  showTip(`${newTemp}\u00b0C \u2192 ${newPct}%`, e.clientX, e.clientY);
+});
+
+document.addEventListener('mouseup', () => {
+  if (!activeDrag) return;
+  curves[activeDrag.curveIdx].points.sort((a, b) => a.temp - b.temp);
+  activeDrag = null;
+  hideTip();
+  renderCurves();
+  scheduleAutoSave();
+});
+
+// Resize handling
+window.addEventListener('resize', () => {
+  curves.forEach((_, i) => drawChart(i));
+});
+
+// Refresh sidebar sensor readings and aggregated values every 5s
+setInterval(async () => {
+  try {
+    const res = await fetch('/api/sensors');
+    const data = await res.json();
+    sensors = data;
+    // Skip sidebar rebuild if user is mid-rename (input would lose focus)
+    if (!document.querySelector('.fan-rename-input')) renderSidebar();
+    // Update aggregated values and redraw charts for temp indicator
+    curves.forEach((c, i) => {
+      const el = document.getElementById(`agg-value-${i}`);
+      if (el) {
+        const v = getAggregatedTemp(c);
+        if (v == null) {
+          el.innerHTML = '<span style="color:var(--text2)">--</span>';
+        } else {
+          el.innerHTML = '<span class="' + tempColor(v).cls + '">' + v.toFixed(1) + '&deg;C</span>';
+        }
+      }
+      drawChart(i);
+    });
+  } catch (e) {}
+}, 5000);
+
+init();
+</script>
+</body>
+</html>
