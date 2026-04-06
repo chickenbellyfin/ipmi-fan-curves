@@ -9,5 +9,6 @@ config.json
 .venv/
 venv/
 *.png
-CLAUDE.md
+push.sh
 README.md
+.claude
